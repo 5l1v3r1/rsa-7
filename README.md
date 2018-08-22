@@ -31,20 +31,14 @@ Install with package manager and retry.
 
 ## Usage ##
 
-![alt text](https://github.com/odzhan/rsa/blob/master/img/usage.png)
-
 * **Generating RSA Key**
  
-![alt text](https://github.com/odzhan/rsa/blob/master/img/generate.png)
+  ./rsa_tool -s private.pem -v public.pem -g 2048
 
 * **Signing a file**
 
-![alt text](https://github.com/odzhan/rsa/blob/master/img/sign.png)
+  ./rsa_tool -s private.pem rsa_tool -x sig.bin
 
 * **Verifying a file**
 
-![alt text](https://github.com/odzhan/rsa/blob/master/img/verify.png)
-
-[@odzhancode](https://www.twitter.com/odzhancode "Follow me on Twitter")
-
-4/22/2017 10:13:30 PM 
+  ./rsa_tool -v public.pem rsa_tool -x sig.bin
