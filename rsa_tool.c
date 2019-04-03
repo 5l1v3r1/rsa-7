@@ -144,7 +144,7 @@ int genkey(
         printf ("  [ Saving public key to %s...\n", pubkey);
         ok = RSA_write_key(rsa, pubkey,  RSA_PUBLIC_KEY);
         printf ("  [ Saving private key to %s...\n", privkey);
-        ok |= RSA_write_key(rsa, privkey, RSA_PRIVATE_KEY);          
+        ok &= RSA_write_key(rsa, privkey, RSA_PRIVATE_KEY);          
       } else xstrerror("RSA_genkey()"); 
       RSA_close(rsa);
     }
