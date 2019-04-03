@@ -61,10 +61,10 @@ void xstrerror (char *fmt, ...)
         NULL, dwError, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), 
         (LPSTR)&error, 0, NULL))
     {
-      printf ("\n  [ %s : %s", buffer, error);
+      printf ("  [ %s : %s\n", buffer, error);
       LocalFree (error);
     } else {
-      printf ("\n  [ %s : %ld", buffer, dwError);
+      printf ("  [ %s : %ld\n", buffer, dwError);
     }
 #else
   printf ("%s", fmt);
@@ -74,10 +74,10 @@ void xstrerror (char *fmt, ...)
 
 /**
  *
- * verify a signature using public key 
+ * verify a signature using RSA public key stored in PEM format
  *
  */
-int verify(
+int verifyfile(
     const char *pubkey, 
     const char *file,
     const char *signature)
@@ -85,12 +85,10 @@ int verify(
     int ok = 0;
     RSA_CTX* ctx = RSA_open();
     
-    if (ctx != NULL) 
-    {
-      printf ("\n  [ Reading public key from %s...", pubkey);       
-      if (RSA_read_key(ctx, pubkey,  RSA_PUBLIC_KEY))
-      { 
-        printf ("\n  [ Reading signature for %s from %s...", 
+    if (ctx != NULL) {
+      printf ("  [ Reading public key from %s...\n", pubkey);       
+      if (RSA_read_key(ctx, pubkey,  RSA_PUBLIC_KEY)) { 
+        printf ("  [ Reading signature for %s from %s...\n", 
             file, signature); 
             
         ok = RSA_verify_file(ctx, file, signature);
@@ -102,10 +100,10 @@ int verify(
 
 /**
  *
- * sign a file using private key 
+ * sign a file using RSA private key stored in PEM format
  *
  */
-int sign(
+int signfile(
     const char *privkey, 
     const char *file,
     const char *signature)
@@ -113,11 +111,9 @@ int sign(
     int ok = 0;
     RSA_CTX* rsa = RSA_open();
     
-    if (rsa != NULL) 
-    {
+    if (rsa != NULL) {
       printf ("\n  [ Reading private key from %s...", privkey);      
-      if (RSA_read_key(rsa, privkey,  RSA_PRIVATE_KEY))
-      {    
+      if (RSA_read_key(rsa, privkey,  RSA_PRIVATE_KEY)) {    
         printf ("\n  [ Writing signature for %s to %s...", 
             file, signature);
             
@@ -145,15 +141,10 @@ int genkey(
     
     if (rsa != NULL) {
       if (RSA_genkey(rsa, bits)) {        
-        printf ("\n  [ Saving public key to %s...", pubkey);
-        if (RSA_write_key(rsa, pubkey,  RSA_PUBLIC_KEY))
-        {
-          printf ("ok\n  [ Saving private key to %s...", privkey);
-          if (RSA_write_key(rsa, privkey, RSA_PRIVATE_KEY))
-          {
-            printf("ok\n");
-          } else xstrerror("RSA_write_key()");
-        } else xstrerror("RSA_write_key()");          
+        printf ("  [ Saving public key to %s...\n", pubkey);
+        ok = RSA_write_key(rsa, pubkey,  RSA_PUBLIC_KEY);
+        printf ("  [ Saving private key to %s...\n", privkey);
+        ok |= RSA_write_key(rsa, privkey, RSA_PRIVATE_KEY);          
       } else xstrerror("RSA_genkey()"); 
       RSA_close(rsa);
     }
@@ -251,7 +242,7 @@ int main(int argc, char *argv[])
         return 0;
       }
       printf ("\n  [ signing file using RSA : %s\n", 
-          sign (priv, file, sig) ? "OK" : "FAILED");
+          signfile(priv, file, sig) ? "OK" : "FAILED");
     } else 
     // verify signature using RSA public key?
     if (v) {
@@ -262,7 +253,7 @@ int main(int argc, char *argv[])
         return 0;
       }
       printf ("\n  [ verifying signature using RSA : %s\n", 
-          verify (pub, file, sig) ? "OK" : "FAILED");
+          verifyfile(pub, file, sig) ? "OK" : "FAILED");
     } else {
       usage();
     }

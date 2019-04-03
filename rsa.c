@@ -59,20 +59,15 @@ void bin2hex(void *in, int len) {
   putchar('\n');  
 }
 
-#define XCHG(x, y) (t) = (x); (x) = (y); (y) = (t);
-
-/**
- *
- * reverse the order of bytes in buffer
- * 
- */
-void byteswap(void *buf, DWORD len) {
-    int    i;
-    BYTE   t;
-    PBYTE  p = (PBYTE)buf;
+// used to convert digital signature from big-endian to little-endian
+void byte_swap(void *buf, int len) {
+    int     i;
+    uint8_t t, *p=(uint8_t*)buf;
     
-    for (i=0; i<len/2; i++) {
-      XCHG(p[len-1-i], p[i]);
+    for(i=0; i<len/2; i++) {
+      t = p[i]; 
+      p[i] = p[len - 1 - i];
+      p[len - 1 - i] = t;
     }
 }
 
@@ -111,8 +106,7 @@ RSA_CTX* RSA_open(void)
  * close CSP and release memory for RSA_CTX object
  *
  */
-void RSA_close(RSA_CTX *ctx)
-{
+void RSA_close(RSA_CTX *ctx) {
   #ifdef CAPI
     if (ctx->hash != 0) {
       CryptDestroyHash(ctx->hash);
@@ -149,8 +143,7 @@ void RSA_close(RSA_CTX *ctx)
  * generate new key pair of keyLen-bits
  *
  */
-int RSA_genkey(RSA_CTX* ctx, int keyLen)
-{
+int RSA_genkey(RSA_CTX* ctx, int keyLen) {
   #ifndef CAPI
     BIGNUM *e=NULL;
     RSA    *rsa;
@@ -195,7 +188,7 @@ int RSA_genkey(RSA_CTX* ctx, int keyLen)
  * convert string to binary
  *
  */    
-void* str2bin (
+void* Base642Bin (
     const char *in, 
     int        inLen, 
     int        flags, 
@@ -223,7 +216,7 @@ void* str2bin (
  * convert binary to string
  *
  */  
-const char* bin2str (LPVOID in, DWORD inLen, DWORD flags) 
+const char* Bin2Base64 (LPVOID in, DWORD inLen, DWORD flags) 
 {
     DWORD  outLen;
     LPVOID out = NULL;
@@ -273,10 +266,10 @@ int PEM_write_file(int pemType,
     // we need to swap bytes for signatures
     // since there's no standard storage format
     if (pemType == RSA_SIGNATURE) {
-       byteswap(data, dataLen);
+       byte_swap(data, dataLen);
     }    
     
-    b64 = bin2str(data, dataLen,
+    b64 = Bin2Base64(data, dataLen,
         CRYPT_STRING_BASE64 | CRYPT_STRING_NOCR);
  
     if (b64 != NULL) {
@@ -327,7 +320,7 @@ void* PEM_read_file(
         // read data
         fread(pem, 1, st.st_size, in);
 
-        bin = str2bin(pem, strlen(pem),
+        bin = Base642Bin(pem, strlen(pem),
             CRYPT_STRING_ANY, binLen);
 
         if (bin != NULL) {
@@ -335,7 +328,7 @@ void* PEM_read_file(
           // swap bytes for signatures
           // since there's no standard storage format  
           if (pemType == RSA_SIGNATURE) {
-             byteswap(bin, *binLen);
+             byte_swap(bin, *binLen);
           }
         }
         free(pem);
@@ -501,8 +494,7 @@ int RSA_write_key(RSA_CTX* ctx,
       {
         pki = malloc(pkiLen);
 
-        if (pki != NULL)
-        {
+        if (pki != NULL) {
           // export the private key
           ok = CryptExportPKCS8(ctx->prov, 
             AT_KEYEXCHANGE, szOID_RSA_RSA, 
@@ -541,65 +533,39 @@ int RSA_write_key(RSA_CTX* ctx,
  * RSA_CTX   : RSA_CTX object with HCRYPTHASH object
  *
  */
-int SHA256_hash(RSA_CTX* ctx, const char* ifile)
+int SHA256_hash(
+    RSA_CTX* ctx, 
+    const char* ifile)
 {
-    LPBYTE    data, p;
-    ULONGLONG len;
-    HANDLE    hFile, hMap;
-    DWORD     r;
-    BOOL      ok=FALSE;
+    FILE *fd;
+    BYTE buf[BUFSIZ];
+    int  len, ok = 0;
 
-    // destroy hash object if already created
+    // 1. destroy hash object if already created
     if (ctx->hash != 0) {
       CryptDestroyHash(ctx->hash);
       ctx->hash = 0;
     }
 
-    // try open the file for reading
-    hFile = CreateFile (ifile, GENERIC_READ, 
-        FILE_SHARE_READ, NULL, OPEN_EXISTING, 
-        FILE_ATTRIBUTE_NORMAL, NULL);
-
-    if (hFile != INVALID_HANDLE_VALUE) {
-      // make sure we have something to hash
-      GetFileSizeEx (hFile, (PLARGE_INTEGER)&len);
-      if (len != 0)
-      {
-        // create a file mapping handle
-        hMap = CreateFileMapping (hFile, NULL,
-            PAGE_READONLY, 0, 0, NULL);
-
-        if (hMap != NULL) {
-          // map a view of the file
-          data = (LPBYTE)MapViewOfFile (hMap,
-              FILE_MAP_READ, 0, 0, 0);
-
-          if (data != NULL)
-          {
-            // create hash object
-            if (CryptCreateHash (ctx->prov,
-                CRYPTO_HASH, 0, 0, &ctx->hash))
-            {
-              p = data;
-              // while data available
-              while (len)
-              {
-                r = (len < 8192) ? len : 8192;
-                // absorb 8192 bytes or whatever remains
-                ok = CryptHashData (ctx->hash, p, r, 0);
-                if (!ok) break;
-
-                len -= r;  // update length
-                p   += r;  // update position in file
-              }
-            }
-            UnmapViewOfFile ((LPCVOID)data);
-          }
-          CloseHandle (hMap);
-        }
+    // 2. try open the file for reading
+    fd = fopen(ifile, "rb");
+    if (fd == NULL) return 0;
+    
+    // 3. create hash object
+    if (CryptCreateHash (ctx->prov,
+      CRYPTO_HASH, 0, 0, &ctx->hash))
+    {
+      // 4. hash file contents
+      for(;;) {
+        len = fread(buf, 1, BUFSIZ, fd);
+        if(len == 0) break;
+        
+        ok = CryptHashData (ctx->hash, buf, len, 0);
+        if (!ok) break;
       }
-      CloseHandle (hFile);
     }
+    fclose(fd);
+    
     return ok;
 }
 
@@ -607,15 +573,17 @@ int SHA256_hash(RSA_CTX* ctx, const char* ifile)
 
 /**
  *
- *          create a signature for file
+ *          create a signature for file using RSA private key
  *
- * sfile   : where to write signature
- * ifile   : contains data to generate signature for
+ * sfile   : output file of RSA signature
+ * ifile   : input file of data to generate signature for
  * RSA_CTX : RSA_CTX object with private key
  *
  */
-int RSA_sign_file(RSA_CTX* ctx,
-    const char* ifile, const char* sfile)
+int RSA_sign_file(
+    RSA_CTX* ctx,
+    const char* ifile, 
+    const char* sfile)
 {
   int      ok=0;
   #ifdef CAPI
@@ -623,29 +591,26 @@ int RSA_sign_file(RSA_CTX* ctx,
     LPVOID sig;
     FILE   *out;
 
+    // 1. try open file for signature
     out = fopen(sfile, "wb");
-    if (out != NULL) 
-    {            
-      // calculate sha256 hash for file
-      if (SHA256_hash(ctx, ifile))
-      {
-        // acquire length of signature
+    if (out != NULL) { 
+      // 2. calculate sha256 hash for file
+      if (SHA256_hash(ctx, ifile)) {
+        // 3. acquire length of signature
         if (CryptSignHash (ctx->hash, 
             AT_KEYEXCHANGE, NULL, 0, 
-            NULL, &sigLen))
-        {
+            NULL, &sigLen)) {
           sig = malloc (sigLen);
-          if (sig != NULL)
-          {
-            // obtain signature
+          if (sig != NULL) {
+            // 4. obtain signature
             if (CryptSignHash (ctx->hash, 
                 AT_KEYEXCHANGE, NULL, 0, 
                 sig, &sigLen))
             {
-              // convert to big-endian format
-              byteswap(sig, sigLen);
+              // 5. convert signature to big-endian format
+              byte_swap(sig, sigLen);
               ok = 1;
-              // save to file
+              // 6. save signature to file
               fwrite(sig, 1, sigLen, out);
             }
             free(sig);
@@ -661,41 +626,40 @@ int RSA_sign_file(RSA_CTX* ctx,
     uint32_t   sigLen, bufLen;
     uint8_t    buf[BUFSIZ];
 
-    // open input file for reading
+    // 1. try open file for reading 
     fd = fopen(ifile, "rb");
     
-    if (fd != NULL) 
-    {
+    if (fd != NULL) {
+      // 2. try open file for signature
       out = fopen(sfile, "wb");
-      if (out != NULL) 
-      {
+      if (out != NULL) {
+        // 3. create digest object
         md = EVP_MD_CTX_create();
-        if (md != NULL) 
-        {
-          // allocate memory for signature
+        if (md != NULL) {
+          // 4. allocate memory for signature
           sigLen = EVP_PKEY_size(ctx->pkey);
           sig    = malloc(sigLen);
         
-          if (sig != NULL) 
-          {              
-            if (EVP_SignInit_ex(md, EVP_sha256(), NULL)) 
-            {
-              // derive sha-256 hash from file data
+          if (sig != NULL) {
+            // 5. initialize signing context
+            if (EVP_SignInit_ex(md, EVP_sha256(), NULL)) {
+              // 6. derive a sha-256 hash from file data
               for (;;) {
                 bufLen = fread(buf, 1, BUFSIZ, fd);
                 if (bufLen == 0) break;
       
                 EVP_SignUpdate(md, buf, bufLen);
               }
+              // 7. obtain the signature
               EVP_SignFinal(md, sig, &sigLen, ctx->pkey);
-              // save signature
+              // 8. save signature to file
               ok = 1;
               fwrite(sig, 1, sigLen, out);
             }
+            free(sig);
           }
-          free(sig);
+          EVP_MD_CTX_destroy(md);
         }
-        EVP_MD_CTX_destroy(md);
         fclose(out);
       }
       fclose(fd);
@@ -724,20 +688,18 @@ int RSA_verify_file(
     BYTE   sig[MAX_RSA_BYTES];
     FILE   *in;
 
-    // read signature from file
+    // 1. read signature from file
     in = fopen(sfile, "rb");
-    
     if (in==NULL) return 0;
-    
     sigLen = fread(sig, 1, MAX_RSA_BYTES, in);
     fclose(in);
 
-    byteswap(sig, sigLen);
+    // 2. convert signature from big-endian to little-endian format
+    byte_swap(sig, sigLen);
     
-    // calculate sha256 hash of file
-    if (SHA256_hash(ctx, ifile))
-    {
-      // verify signature using public key
+    // 3. calculate sha256 hash of file
+    if (SHA256_hash(ctx, ifile)) {
+      // 4. verify signature using public key
       ok = CryptVerifySignature (ctx->hash, sig,
             sigLen, ctx->pubkey, NULL, 0);
     }
@@ -748,34 +710,29 @@ int RSA_verify_file(
     int        sigLen=0, bufLen;
     uint8_t    buf[BUFSIZ];
 
+    // 1. read signature from file
     in = fopen(sfile, "rb");
-    
     if (in==NULL) return 0;
-    
     sigLen = fread(sig, 1, MAX_RSA_BYTES, in);
     fclose(in);
 
-    // open input file for reading
+    // 2. open input file for reading
     fd = fopen(ifile, "rb");
     
-    // if opened
-    if (fd != NULL) 
-    {
-      // create message digest context
+    if (fd != NULL) {
+      // 3. create message digest context
       md = EVP_MD_CTX_create();
-      if (md != NULL) 
-      {
-        // use SHA-256 for hash
-        if (EVP_VerifyInit_ex(md, EVP_sha256(), NULL)) 
-        {
-          // hash data in file
+      if (md != NULL) {
+        // 4. initialize for SHA-256
+        if (EVP_VerifyInit_ex(md, EVP_sha256(), NULL)) {
+          // 5. hash data in file
           for (;;) {
             bufLen = fread(buf, 1, BUFSIZ, fd);
             if (bufLen == 0) break;
       
             EVP_VerifyUpdate(md, buf, bufLen);
           }
-          // good signature?
+          // 6. good signature?
           ok = EVP_VerifyFinal(md, sig, sigLen, ctx->pkey);
         }
         EVP_MD_CTX_destroy(md);

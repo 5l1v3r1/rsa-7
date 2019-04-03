@@ -108,7 +108,7 @@ extern "C" {
   #ifdef CAPI
     int PEM_write_file(int, const char*, void*, int); 
     void* PEM_read_file(int, const char*, PDWORD);  
-    void* str2bin (const char *in, int inLen, int flags, PDWORD outLen);
+    void* Base642Bin (const char *in, int inLen, int flags, PDWORD outLen);
   #endif
     
 #ifdef __cplusplus
