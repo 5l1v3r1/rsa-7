@@ -225,13 +225,14 @@ int main(int argc, char *argv[])
       }
     }
     // generate keys?
-    if (g)
-    {
+    if (g) {
       if (bitlen < 1024) {
         printf ("  [ keylen is too small\n");
       } else {
         printf ("  [ generating RSA key pair of %i-bits\n", bitlen);
-        genkey(pub, priv, bitlen);
+        if(!genkey(pub, priv, bitlen)) {
+          printf("  [ failed to generate keys.\n");
+        }
       }
     } else 
     // generate signature of message using RSA private key?

@@ -31,32 +31,31 @@
 
 #ifdef CAPI
 void bin2hex(void *in, int len) {
-
-  DWORD outlen=0;
-  int ofs = 0;
-  LPTSTR out;
-  
-  if (ofs==0) printf("\n");
-  
-  ofs += len;
-  
-  if (CryptBinaryToString(
-      in, len, CRYPT_STRING_HEXASCIIADDR | CRYPT_STRING_NOCR,
-      NULL, &outlen))
-  {
-    out = malloc(outlen);
-    if (out!=NULL)
+    DWORD  outlen=0;
+    int    ofs = 0;
+    LPTSTR out;
+    
+    if (ofs==0) printf("\n");
+    
+    ofs += len;
+    
+    if (CryptBinaryToString(
+        in, len, CRYPT_STRING_HEXASCIIADDR | CRYPT_STRING_NOCR,
+        NULL, &outlen))
     {
-      if (CryptBinaryToString(
-          in, len, CRYPT_STRING_HEXASCIIADDR | CRYPT_STRING_NOCR,
-          out, &outlen))
+      out = malloc(outlen);
+      if (out!=NULL)
       {
-        printf ("%s", out);
-      }
-      free(out);
-    }      
-  }
-  putchar('\n');  
+        if (CryptBinaryToString(
+            in, len, CRYPT_STRING_HEXASCIIADDR | CRYPT_STRING_NOCR,
+            out, &outlen))
+        {
+          printf ("%s", out);
+        }
+        free(out);
+      }      
+    }
+    putchar('\n');  
 }
 
 // used to convert digital signature from big-endian to little-endian
@@ -107,35 +106,35 @@ RSA_CTX* RSA_open(void)
  *
  */
 void RSA_close(RSA_CTX *ctx) {
-  #ifdef CAPI
-    if (ctx->hash != 0) {
-      CryptDestroyHash(ctx->hash);
-      ctx->hash = 0;
-    }
+    #ifdef CAPI
+      if (ctx->hash != 0) {
+        CryptDestroyHash(ctx->hash);
+        ctx->hash = 0;
+      }
 
-    // release private key
-    if (ctx->privkey != 0) {
-      CryptDestroyKey(ctx->privkey);
-      ctx->privkey = 0;
-    }
+      // release private key
+      if (ctx->privkey != 0) {
+        CryptDestroyKey(ctx->privkey);
+        ctx->privkey = 0;
+      }
 
-    // release public key
-    if (ctx->pubkey != 0) {
-      CryptDestroyKey(ctx->pubkey);
-      ctx->pubkey = 0;
-    }
+      // release public key
+      if (ctx->pubkey != 0) {
+        CryptDestroyKey(ctx->pubkey);
+        ctx->pubkey = 0;
+      }
 
-    // release csp
-    if (ctx->prov != 0) {
-      CryptReleaseContext(ctx->prov, 0);
-      ctx->prov = 0;
-    }
-  #else
-    EVP_PKEY_free(ctx->pkey); 
-  #endif
+      // release csp
+      if (ctx->prov != 0) {
+        CryptReleaseContext(ctx->prov, 0);
+        ctx->prov = 0;
+      }
+    #else
+      EVP_PKEY_free(ctx->pkey); 
+    #endif
 
-  // release object
-  free(ctx);  
+    // release object
+    free(ctx);  
 }
 
 /**
@@ -144,42 +143,48 @@ void RSA_close(RSA_CTX *ctx) {
  *
  */
 int RSA_genkey(RSA_CTX* ctx, int keyLen) {
-  #ifndef CAPI
-    BIGNUM *e=NULL;
-    RSA    *rsa;
-  #endif  
-  int ok=0;  
-  if (ctx==NULL) return 0;
-      
-  #ifdef CAPI
-    // release public
-    if (ctx->pubkey != 0) {
-      CryptDestroyKey(ctx->pubkey);
-      ctx->pubkey = 0;
-    }
-
-    // release private
-    if (ctx->privkey != 0) {
-      CryptDestroyKey(ctx->privkey);
-      ctx->privkey = 0;
-    }
-
-    // generate key pair for signing
-    ok = CryptGenKey(ctx->prov, AT_KEYEXCHANGE,
-      (keyLen << 16) | CRYPT_EXPORTABLE,
-      &ctx->privkey);
-  #else
-    BN_dec2bn(&e, "65537"); // public exponent
-    rsa = RSA_new(); 
-    
-    if (RSA_generate_key_ex(rsa, keyLen, e, NULL)) {
-      if ((ctx->pkey = EVP_PKEY_new()) != NULL) { 
-        ok = EVP_PKEY_assign_RSA(ctx->pkey, rsa);
+    #ifndef CAPI
+      BIGNUM *e=NULL;
+      RSA    *rsa;
+    #endif  
+    int ok=0;  
+    if (ctx==NULL) return 0;
+        
+    #ifdef CAPI
+      // 1. release public if already allocated
+      if (ctx->pubkey != 0) {
+        CryptDestroyKey(ctx->pubkey);
+        ctx->pubkey = 0;
       }
-    }
-    BN_free(e);    
-  #endif
-  return ok;  
+
+      // 2. release private if already allocated
+      if (ctx->privkey != 0) {
+        CryptDestroyKey(ctx->privkey);
+        ctx->privkey = 0;
+      }
+
+      // 3. generate key pair for digital signatures
+      ok = CryptGenKey(ctx->prov, AT_SIGNATURE,
+        (keyLen << 16) | CRYPT_EXPORTABLE,
+        &ctx->privkey);
+    #else
+      // 1. initialize public exponent
+      BN_dec2bn(&e, "65537");
+      
+      // 2. create new RSA context
+      rsa = RSA_new(); 
+      
+      // 3. generate key pair for digital signatures
+      if (RSA_generate_key_ex(rsa, keyLen, e, NULL)) {
+        // 4. create new EVP key context
+        if ((ctx->pkey = EVP_PKEY_new()) != NULL) {
+          // 5. assign RSA context to EVP key context        
+          ok = EVP_PKEY_assign_RSA(ctx->pkey, rsa);
+        }
+      }
+      BN_free(e);    
+    #endif
+    return ok;  
 }
 
 #ifdef CAPI
@@ -351,12 +356,14 @@ void* PEM_read_file(
 int RSA_read_key(RSA_CTX* ctx,
     const char* ifile, int pemType)
 {
-  int                       ok=0;
+  int                         ok=0;
   #ifdef CAPI
-    LPVOID                  derData, keyData;
-    PCRYPT_PRIVATE_KEY_INFO pki = 0;
-    DWORD                   pkiLen, derLen, keyLen;
- 
+    LPVOID                    derData, keyData;
+    PCRYPT_PRIVATE_KEY_INFO   pki = 0;
+    DWORD                     pkiLen, derLen, keyLen;
+    CRYPT_DIGEST_BLOB         keyBlob;
+    CRYPT_PKCS8_IMPORT_PARAMS param;
+        
     // decode base64 string
     derData = PEM_read_file(pemType, ifile, &derLen);
 
@@ -364,47 +371,50 @@ int RSA_read_key(RSA_CTX* ctx,
       // decode DER
       // is it a public key?
       if (pemType == RSA_PUBLIC_KEY) { 
+        // 1. convert DER to RSA public key info
         if (CryptDecodeObjectEx(
             X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
             X509_PUBLIC_KEY_INFO, derData, derLen,
             CRYPT_DECODE_ALLOC_FLAG, NULL,
             &keyData, &keyLen))
         {
-          // if decode ok, import into key object
+          // 2. import public key blob
           ok = CryptImportPublicKeyInfo(ctx->prov, 
              X509_ASN_ENCODING,
             (PCERT_PUBLIC_KEY_INFO)keyData, &ctx->pubkey);
 
-          // release allocated memory
+          // 3. release allocated memory
           LocalFree(keyData);
         }
       } else {
-        // convert the PKCS#8 data to private key info
-        if (CryptDecodeObjectEx(
-            X509_ASN_ENCODING,
-            PKCS_PRIVATE_KEY_INFO, derData, derLen,
+        // 1. convert PKCS8 data to private key info
+        if(CryptDecodeObjectEx(
+          X509_ASN_ENCODING,
+          PKCS_PRIVATE_KEY_INFO,
+          derData, derLen,
+          CRYPT_DECODE_ALLOC_FLAG,
+          NULL, &pki, &pkiLen))
+        {
+          // 2. convert private key info to RSA private key blob
+          if(CryptDecodeObjectEx(
+            X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
+            PKCS_RSA_PRIVATE_KEY,
+            pki->PrivateKey.pbData, 
+            pki->PrivateKey.cbData,
             CRYPT_DECODE_ALLOC_FLAG,
-            NULL, &pki, &pkiLen))
-        {          
-          // then convert the private key to private key blob
-          if (CryptDecodeObjectEx(
-              X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
-              PKCS_RSA_PRIVATE_KEY,
-              pki->PrivateKey.pbData,
-              pki->PrivateKey.cbData,
-              CRYPT_DECODE_ALLOC_FLAG, NULL,
-              &keyData, &keyLen))
+            NULL, &keyData, &keyLen))
           {
-            // if decode ok, import it
-            ok = CryptImportKey(ctx->prov, keyData, keyLen,
-                0, CRYPT_EXPORTABLE, &ctx->privkey);
-
-            // release data
+            // 3. import private key blob
+            ok = CryptImportKey(
+              ctx->prov, 
+              keyData, keyLen, 0,
+              CRYPT_EXPORTABLE, 
+              &ctx->privkey);
+              
             LocalFree(keyData);
           }
-          // release private key info
           LocalFree(pki);
-        } 
+        }
       }
       free(derData);
     }
@@ -445,24 +455,23 @@ int RSA_write_key(RSA_CTX* ctx,
     LPVOID pki, derData;
 
     // public key?
-    if (pemType == RSA_PUBLIC_KEY)
-    {
-      // get size of public key info
+    if (pemType == RSA_PUBLIC_KEY) {
+      // 1. get size of public key info
       if (CryptExportPublicKeyInfo(ctx->prov, 
-          AT_KEYEXCHANGE,
+          AT_SIGNATURE,
           X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
           NULL, &pkiLen))
       {
-        // allocate memory
+        // 2. allocate memory
         pki = malloc(pkiLen);
 
-        // export public key info
+        // 3. export public key info
         if (CryptExportPublicKeyInfo(ctx->prov, 
-            AT_KEYEXCHANGE,
+            AT_SIGNATURE,
             X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
             pki, &pkiLen))
         {
-          // get size of DER encoding
+          // 4. get size of DER encoding
           if (CryptEncodeObjectEx(
             X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
             X509_PUBLIC_KEY_INFO, pki, 0,
@@ -470,16 +479,16 @@ int RSA_write_key(RSA_CTX* ctx,
           {
             derData = malloc(derLen);
             if (derData) {
-              // convert to DER format
+              // 5. convert to DER format
               ok = CryptEncodeObjectEx(
                 X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
                 X509_PUBLIC_KEY_INFO, pki, 0,
                 NULL, derData, &derLen);
 
-                // write to PEM file
-                if (ok) {
-                  PEM_write_file(RSA_PUBLIC_KEY, 
-                      ofile, derData, derLen);
+              // 6. write to PEM file
+              if (ok) {
+                PEM_write_file(RSA_PUBLIC_KEY, 
+                    ofile, derData, derLen);
               }
             }
             free(derData);            
@@ -487,21 +496,21 @@ int RSA_write_key(RSA_CTX* ctx,
         }
       }
     } else {
-      // get length of PKCS#8 encoding
-      if (CryptExportPKCS8(ctx->prov, 
-          AT_KEYEXCHANGE, szOID_RSA_RSA, 
-          0, NULL, NULL, &pkiLen))
+      
+      // 1. calculate size of PKCS#8 structure
+      if(CryptExportPKCS8(
+        ctx->prov, AT_SIGNATURE, szOID_RSA_RSA, 
+        0, NULL, NULL, &pkiLen))
       {
         pki = malloc(pkiLen);
-
-        if (pki != NULL) {
-          // export the private key
-          ok = CryptExportPKCS8(ctx->prov, 
-            AT_KEYEXCHANGE, szOID_RSA_RSA, 
-            0x8000, NULL, pki, &pkiLen);
-
-          // write key to PEM file
-          if (ok) {
+        
+        if(pki != NULL) {
+          // 2. export PKCS#8 structure to memory
+          ok = CryptExportPKCS8(
+                ctx->prov, AT_SIGNATURE, szOID_RSA_RSA, 
+                0, NULL, pki, &pkiLen);
+          if(ok) {
+            // 3. write memory to file in PEM format
             PEM_write_file(RSA_PRIVATE_KEY, 
                 ofile, pki, pkiLen);
           }
